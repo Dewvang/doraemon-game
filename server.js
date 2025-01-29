@@ -2,12 +2,11 @@ import express from "express";
 import bodyParser from "body-parser";
 import pg from "pg";
 import dotenv from "dotenv";
-import path from "path";
 
-dotenv.config(); // เพิ่มการโหลดค่า .env
+dotenv.config();
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT;
 
 const db = new pg.Client({
     user: process.env.DB_USER,
@@ -29,36 +28,67 @@ app.listen(port, () => {
     console.log(`Server is running at http://localhost:${port}`);
 });
 
-app.set("view engine", "ejs");
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(express.static("public")); // ใช้ public folder สำหรับ static files
-
 let cards = [];
+let currentCard = {};
 
-// ดึงข้อมูลจากฐานข้อมูลและเก็บในตัวแปร cards
-db.query("SELECT * FROM cards", (err, res) => {
-    if (err) {
-        console.error("Error executing query", err.stack);
-    } else {
-        cards = res.rows;
-    }
-    db.end(); // ปิดการเชื่อมต่อหลังจากดึงข้อมูลเสร็จ
-});
-
-// การแสดงผลข้อมูลในหน้า index.ejs
-app.get("/", async (req, res) => {
-    const card = await nextCard();
-    res.render("index", { card });
-});
-
-// ฟังก์ชั่นที่จะเลือกการ์ดแบบสุ่ม
-async function nextCard() {
-    if (cards.length === 0) {
-        return null; // หากยังไม่มีข้อมูลการ์ด
-    }
-    const randomcard = cards[Math.floor(Math.random() * cards.length)];
-    return randomcard; // คืนค่าการ์ดที่สุ่มเลือก
+const fetchCards = () => {
+    return new Promise((resolve, reject) => {
+        db.query("SELECT * FROM cards", (err, res) => {
+            if (err) {
+                console.error("Error executing query", err.stack);
+                reject(err);
+            } else {
+                cards = res.rows;
+                resolve(cards);
+            }
+        });
+    });
 };
+
+fetchCards().then(() => {
+    console.log("Cards loaded");
+});
+
+async function nextCard() {
+    const randomIndex = Math.floor(Math.random() * cards.length);
+    const randomCard = cards[randomIndex];
+    currentCard = randomCard;
+
+    cards.splice(randomIndex, 1);
+}
+
+app.get("/", async (req, res) => {
+    const startCard = {
+        pic: '/images/0.png',
+        name: 'การ์ดเริ่มเกม',
+        detail: 'กดที่การ์ดเพื่อเริ่มเล่น'
+    };
+
+    res.render("index.ejs", { card: startCard, remainingCards: cards.length });
+});
+
+app.get("/next-card", async (req, res) => {
+    try {
+        await nextCard();
+        res.render("index.ejs", { card: currentCard, remainingCards: cards.length });
+    } catch (err) {
+        res.status(500).send("Error fetching next card.");
+    }
+});
+
+app.get("/reset", async (req, res) => {
+    try {
+        await fetchCards();
+        currentCard = {};
+        await nextCard();
+        res.render("index.ejs", {
+            card: currentCard,
+            remainingCards: cards.length
+        });
+    } catch (err) {
+        res.status(500).send("Error resetting the deck.");
+    }
+});
 
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static("public"));
